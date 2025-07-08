@@ -16,7 +16,7 @@ from cumulusci.core.config import UniversalConfig
 from cumulusci.utils import get_cci_upgrade_command
 from cumulusci.utils.http.requests_utils import safe_json_from_response
 
-LOWEST_SUPPORTED_VERSION = (3, 8, 0)
+LOWEST_SUPPORTED_VERSION = (3, 11, 0)
 WIN_LONG_PATH_WARNING = """
 WARNING: Long path support is not enabled. This can lead to errors with some
 tasks. Your administrator will need to activate the "Enable Win32 long paths"
@@ -110,7 +110,7 @@ def check_latest_version():
 
         if sys.version_info < LOWEST_SUPPORTED_VERSION:
             click.echo(
-                "Sorry! Your Python version is not supported. Please upgrade to Python 3.9.",
+                "Sorry! Your Python version is not supported. Please upgrade to Python 3.11.",
                 err=True,
             )
 

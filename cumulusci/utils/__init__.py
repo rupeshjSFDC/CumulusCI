@@ -38,10 +38,10 @@ BREW_DEPRECATION_MSG = (
     "It looks like you have installed CumulusCI using brew."
     "This method of installation is no longer supported."
     "Please use the following to install CumulusCI with pipx:\n"
-    "brew uninstall cumulusci\nbrew install pipx\npipx ensurepath\npipx install cumulusci"
+    "brew uninstall cumulusci-plus\nbrew install pipx\npipx ensurepath\npipx install cumulusci-plus"
 )
-PIP_UPDATE_CMD = "pip install --upgrade cumulusci"
-PIPX_UPDATE_CMD = "pipx upgrade cumulusci"
+PIP_UPDATE_CMD = "pip install --upgrade cumulusci-plus"
+PIPX_UPDATE_CMD = "pipx upgrade cumulusci-plus"
 
 
 def parse_api_datetime(value):
