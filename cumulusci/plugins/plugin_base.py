@@ -15,7 +15,7 @@ class PluginBase(ABC):
     plugin_project_config: Optional[dict] = None
 
     def __init__(self, **kwargs) -> None:
-        self.logger = kwargs.get("logger", logging.getLogger(self.__class__.__name__))
+        self.logger = kwargs.get("logger", logging.getLogger(__name__))
         self.path = inspect.getfile(self.__class__)
         self._load_config()
 
@@ -90,4 +90,9 @@ class PluginBase(ABC):
 
     def _initialize(self) -> None:
         """Override this method to add custom initialization logic."""
+        pass
+
+    def check_latest_version(self):
+        """Override this method to check for the latest version of the plugin."""
+        # Implement logic to check for the latest version if needed
         pass

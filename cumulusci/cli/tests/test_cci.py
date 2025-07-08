@@ -407,8 +407,8 @@ def test_cli():
 def test_version(capsys):
     run_click_command(cci.version)
     console_output = capsys.readouterr().out
-    assert f"CumulusCI version: {cumulusci.__version__}" in console_output
-    assert "There is a newer version of CumulusCI available" in console_output
+    assert f"CumulusCI Plus version: {cumulusci.__version__}" in console_output
+    assert "There is a newer version of CumulusCI Plus available" in console_output
 
 
 @mock.patch(

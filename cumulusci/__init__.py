@@ -15,6 +15,12 @@ try:
 except PackageNotFoundError:
     __version__ = "unknown"
 
+try:
+    version("cumulusci")
+    raise Exception("CumulusCI installation found, Remove the CumulusCI package.")
+except PackageNotFoundError:
+    pass
+
 if sys.version_info < (3, 11):  # pragma: no cover
     raise Exception("CumulusCI requires Python 3.11+.")
 

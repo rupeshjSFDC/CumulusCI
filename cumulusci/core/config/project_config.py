@@ -185,7 +185,7 @@ class BaseProjectConfig(BaseTaskFlowConfig, ProjectConfigPropertiesMixin):
                 self.config_additional_yaml.update(additional_yaml_config)
 
         # Loading plugins as classes are loaded and available.
-        plugins = load_plugins(self.logger)
+        plugins = load_plugins()
 
         # Load the plugin yaml config file if it exists
         for plugin in plugins:

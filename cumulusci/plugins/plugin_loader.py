@@ -5,20 +5,22 @@ from typing import Dict, List, Optional, Type
 
 from cumulusci.plugins.plugin_base import PluginBase
 
+logger: logging.Logger = logging.getLogger(__name__)
 
-def get_plugin_manager(logger: logging.Logger) -> "PluginManager":
+
+def get_plugin_manager() -> "PluginManager":
     """Get the plugin manager instance."""
-    return PluginManager(logger=logger)
+    return PluginManager()
 
 
 @lru_cache(maxsize=50)
-def load_plugins(logger: logging.Logger) -> List[PluginBase]:
+def load_plugins() -> List[PluginBase]:
     """Load all available plugins and return them as a list."""
-    manager = get_plugin_manager(logger)
+    manager = get_plugin_manager()
     plugins = []
     for name, plugin_class in manager._plugins.items():
         try:
-            plugin = plugin_class(logger=logger)
+            plugin = plugin_class()
             plugin.initialize()
             plugins.append(plugin)
         except Exception as e:
@@ -29,9 +31,9 @@ def load_plugins(logger: logging.Logger) -> List[PluginBase]:
 class PluginManager:
     """Manages the loading and access of CumulusCI plugins."""
 
-    def __init__(self, logger: logging.Logger) -> None:
+    def __init__(self) -> None:
         self._plugins: Dict[str, Type[PluginBase]] = {}
-        self.logger = logger
+        self.logger = logging.getLogger(__name__)
         self._load_plugins()
 
     def _load_plugins(self) -> None:
