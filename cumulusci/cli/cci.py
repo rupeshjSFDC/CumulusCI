@@ -184,8 +184,13 @@ def show_version_info():
 
 def show_plugin_version_infos(console: Console):
     """Display version information for all loaded plugins."""
-    console.print("Loaded plugins:")
     plugins = load_plugins()
+
+    if not plugins:
+        return
+
+    console.print("Loaded plugins:")
+
     for plugin in plugins:
         try:
             console.print(f"  [bold]{plugin.name}[/bold]: {plugin.version}")
