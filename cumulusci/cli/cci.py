@@ -14,6 +14,7 @@ from rich.markup import escape
 import cumulusci
 from cumulusci.core.debug import set_debug_mode
 from cumulusci.core.exceptions import CumulusCIUsageError
+from cumulusci.plugins.plugin_loader import load_plugins
 from cumulusci.utils import get_cci_upgrade_command
 from cumulusci.utils.http.requests_utils import init_requests_trust
 from cumulusci.utils.logging import tee_stdout_stderr
@@ -29,6 +30,7 @@ from .runtime import CliRuntime, pass_runtime
 from .service import service
 from .task import task
 from .utils import (
+    check_latest_plugins,
     check_latest_version,
     get_installed_version,
     get_latest_final_version,
@@ -63,6 +65,7 @@ def main(args=None):
         is_version_command = len(args) > 1 and args[1] == "version"
         if "--json" not in args and not is_version_command:
             check_latest_version()
+            check_latest_plugins()
 
         # Only create logfiles for commands that are not `cci error`
         is_error_command = len(args) > 2 and args[1] == "error"
@@ -152,8 +155,13 @@ def show_debug_info():
 
 def show_version_info():
     console = rich.get_console()
-    console.print(f"CumulusCI version: {cumulusci.__version__} ({sys.argv[0]})")
+    console.print(
+        f"[bold]CumulusCI Plus[/bold] version: {cumulusci.__version__} ({sys.argv[0]})"
+    )
+    show_plugin_version_infos(console)
+
     console.print(f"Python version: {sys.version.split()[0]} ({sys.executable})")
+
     console.print()
     warn_if_no_long_paths(console=console)
 
@@ -161,21 +169,41 @@ def show_version_info():
     latest_version = get_latest_final_version()
 
     if not latest_version > current_version:
-        console.print("You have the latest version of CumulusCI :sun_behind_cloud:\n")
+        console.print(
+            "You have the latest version of CumulusCI Plus :sun_behind_cloud:\n"
+        )
         display_release_notes_link(str(latest_version))
         return
 
     console.print(
-        f"[yellow]There is a newer version of CumulusCI available: {str(latest_version)}"
+        f"[yellow]There is a newer version of CumulusCI Plus available: {str(latest_version)}"
     )
     console.print(f"To upgrade, run `{get_cci_upgrade_command()}`")
     display_release_notes_link(str(latest_version))
 
 
+def show_plugin_version_infos(console: Console):
+    """Display version information for all loaded plugins."""
+    plugins = load_plugins()
+
+    if not plugins:
+        return
+
+    console.print("Loaded plugins:")
+
+    for plugin in plugins:
+        try:
+            console.print(f"  [bold]{plugin.name}[/bold]: {plugin.version}")
+        except Exception as e:
+            console.print(
+                f"  [bold]{plugin.name}[/bold]: [red]Error retrieving version: {e}[/red]"
+            )
+
+
 def display_release_notes_link(latest_version: str) -> None:
     """Provide a link to the latest CumulusCI Release Notes"""
     release_notes_link = (
-        f"https://github.com/SFDO-Tooling/CumulusCI/releases/tag/v{latest_version}"
+        f"https://github.com/jorgesolebur/CumulusCI/releases/tag/v{latest_version}"
     )
     console = rich.get_console()
     console.print(

@@ -183,13 +183,8 @@ class Plugin(CCIDictModel):
 
     @root_validator()
     def _check_name_version(cls, values):
-        has_name = values.get("name") is not None
-        has_version = values.get("version") is not None
-
-        # If one is defined, both should be defined
-        if (has_name and not has_version) or (has_version and not has_name):
-            raise ValueError("Plugin Name and Version must be defined.")
-
+        if values.get("name") is None:
+            raise ValueError("Plugin Name must be defined.")
         return values
 
 

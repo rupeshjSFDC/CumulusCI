@@ -1,9 +1,9 @@
 # CumulusCI
 
 [![Code Coverage](https://coveralls.io/repos/github/SFDO-Tooling/CumulusCI/badge.svg?branch=main)](https://coveralls.io/github/SFDO-Tooling/CumulusCI?branch=main)
-[![PyPI](https://img.shields.io/pypi/v/cumulusci)](https://pypi.org/project/cumulusci/)
-![PyPI - Python Version](https://img.shields.io/pypi/pyversions/cumulusci)
-![PyPI - License](https://img.shields.io/pypi/l/cumulusci)
+[![PyPI](https://img.shields.io/pypi/v/cumulusci)](https://pypi.org/project/cumulusci-plus/)
+![PyPI - Python Version](https://img.shields.io/pypi/pyversions/cumulusci-plus)
+![PyPI - License](https://img.shields.io/pypi/l/cumulusci-plus)
 [![Documentation Status](https://readthedocs.org/projects/cumulusci/badge/?version=latest)](https://cumulusci.readthedocs.io/en/latest/?badge=latest)
 
 CumulusCI helps build great applications on the Salesforce platform by

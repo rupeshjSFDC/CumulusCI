@@ -13,10 +13,11 @@ from rich.console import Console
 
 from cumulusci import __version__
 from cumulusci.core.config import UniversalConfig
+from cumulusci.plugins.plugin_loader import load_plugins
 from cumulusci.utils import get_cci_upgrade_command
 from cumulusci.utils.http.requests_utils import safe_json_from_response
 
-LOWEST_SUPPORTED_VERSION = (3, 8, 0)
+LOWEST_SUPPORTED_VERSION = (3, 11, 0)
 WIN_LONG_PATH_WARNING = """
 WARNING: Long path support is not enabled. This can lead to errors with some
 tasks. Your administrator will need to activate the "Enable Win32 long paths"
@@ -67,13 +68,15 @@ def is_final_release(version: str) -> bool:
     return bool(FINAL_VERSION_RE.match(version))
 
 
-def get_latest_final_version():
+def get_latest_final_version(
+    pkg="cumulusci-plus", tstamp_file="cumulus_timestamp"
+) -> packaging_version.Version:
     """return the latest version of cumulusci in pypi, be defensive"""
     # use the pypi json api https://wiki.python.org/moin/PyPIJSON
     res = safe_json_from_response(
-        requests.get("https://pypi.org/pypi/cumulusci/json", timeout=5)
+        requests.get(f"https://pypi.org/pypi/{pkg}/json", timeout=5)
     )
-    with timestamp_file() as f:
+    with timestamp_file(timestamp_file=tstamp_file) as f:
         f.write(str(time.time()))
     versions = []
     for versionstring in res["releases"].keys():
@@ -84,33 +87,38 @@ def get_latest_final_version():
     return versions[0]
 
 
-def check_latest_version():
+def check_latest_version(
+    pkg="cumulusci-plus",
+    installed_version=None,
+    tstamp_file="cumulus_timestamp",
+    message=f"""An update to CumulusCI Plus is available. To install the update, run this command: {get_cci_upgrade_command()}""",
+):
     """checks for the latest version of cumulusci from pypi, max once per hour"""
     check = True
 
-    with timestamp_file() as f:
+    with timestamp_file(timestamp_file=tstamp_file) as f:
         timestamp = float(f.read() or 0)
     delta = time.time() - timestamp
     check = delta > 3600
 
     if check:
         try:
-            latest_version = get_latest_final_version()
+            latest_version = get_latest_final_version(pkg, tstamp_file)
         except requests.exceptions.RequestException as e:
             click.echo("Error checking cci version:", err=True)
             click.echo(str(e), err=True)
             return
 
-        result = latest_version > get_installed_version()
+        result = latest_version > (installed_version or get_installed_version())
         if result:
             click.echo(
-                f"""An update to CumulusCI is available. To install the update, run this command: {get_cci_upgrade_command()}""",
+                message,
                 err=True,
             )
 
         if sys.version_info < LOWEST_SUPPORTED_VERSION:
             click.echo(
-                "Sorry! Your Python version is not supported. Please upgrade to Python 3.9.",
+                "Sorry! Your Python version is not supported. Please upgrade to Python 3.11.",
                 err=True,
             )
 
@@ -148,3 +156,14 @@ def warn_if_no_long_paths(console: Console = Console()) -> None:
     """Print a warning to the user if long paths are not enabled."""
     if sys.platform.startswith("win") and not win32_long_paths_enabled():
         console.print(WIN_LONG_PATH_WARNING)
+
+
+def check_latest_plugins():
+    plugins = load_plugins()
+    for plugin in plugins:
+        try:
+            plugin.check_latest_version()
+        except Exception as e:
+            click.echo(
+                f"Error checking latest version for plugin {plugin.name}: {e}", err=True
+            )

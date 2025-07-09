@@ -123,6 +123,7 @@ pipx install cumulusci
 When finished, [verify your installation](verify-your-installation).
 
 (update-environment-variables-manually)=
+
 #### Update Environment Variables Manually
 
 1.  Click Start and search for `edit environment variables`, or open
@@ -151,10 +152,10 @@ running `cci version`.
 
 ```console
 $ cci version
-CumulusCI version: 3.29.0 (/path/to/bin/cci)
+CumulusCI Plus version: 3.29.0 (/path/to/bin/cci)
 Python version: 3.8.5 (/path/to/bin/python)
 
-You have the latest version of CumulusCI.
+You have the latest version of CumulusCI Plus.
 ```
 
 You can also use this command to check whether your CumulusCI

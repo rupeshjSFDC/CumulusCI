@@ -22,7 +22,7 @@ def test_get_installed_version():
 def test_get_latest_final_version():
     responses.add(
         method="GET",
-        url="https://pypi.org/pypi/cumulusci/json",
+        url="https://pypi.org/pypi/cumulusci-plus/json",
         body=json.dumps(
             {
                 "releases": {

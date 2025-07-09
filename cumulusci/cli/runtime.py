@@ -146,7 +146,7 @@ class CliRuntime(BaseCumulusCI):
                 parsed_version = version.parse(min_cci_version)
                 if get_installed_version() < parsed_version:
                     raise click.UsageError(
-                        f"This project requires CumulusCI version {min_cci_version} or later. "
+                        f"This project requires CumulusCI Plus version {min_cci_version} or later. "
                         f"To upgrade, please run this command: {get_cci_upgrade_command()}"
                     )
 
