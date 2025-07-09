@@ -91,7 +91,7 @@ def check_latest_version(
     pkg="cumulusci-plus",
     installed_version=None,
     tstamp_file="cumulus_timestamp",
-    message=f"""An update to CumulusCI is available. To install the update, run this command: {get_cci_upgrade_command()}""",
+    message=f"""An update to CumulusCI Plus is available. To install the update, run this command: {get_cci_upgrade_command()}""",
 ):
     """checks for the latest version of cumulusci from pypi, max once per hour"""
     check = True

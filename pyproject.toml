@@ -98,7 +98,7 @@ cci = "cumulusci.cli.cci:main"
 snowfakery = "snowfakery.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/SFDO-Tooling/CumulusCI"
+Homepage = "https://github.com/jorgesolebur/CumulusCI"
 Changelog = "https://cumulusci.readthedocs.io/en/stable/history.html"
 "Bug Tracker" = "https://github.com/SFDO-Tooling/CumulusCI/issues"
 
