@@ -139,3 +139,154 @@ class TestProcessListOfPairsDictArg:
         error_message = re.escape("Var specified twice: foo")
         with pytest.raises(TaskOptionsError, match=error_message):
             utils.process_list_of_pairs_dict_arg(duplicate)
+
+
+class TestDeepMergePlugins:
+    """Test the deep_merge_plugins function"""
+
+    def test_deep_merge_plugins_remote_takes_precedence(self):
+        """Test that remote plugins take precedence over project plugins"""
+        remote_plugins = {"plugin1": {"setting": "remote_value"}}
+        project_plugins = {"plugin1": {"setting": "project_value"}}
+
+        result = utils.deep_merge_plugins(remote_plugins, project_plugins)
+
+        assert result == {"plugin1": {"setting": "remote_value"}}
+
+    def test_deep_merge_plugins_project_provides_defaults(self):
+        """Test that project plugins provide defaults for missing keys"""
+        remote_plugins = {"plugin1": {"setting1": "remote_value"}}
+        project_plugins = {"plugin1": {"setting2": "project_value"}}
+
+        result = utils.deep_merge_plugins(remote_plugins, project_plugins)
+
+        assert result == {
+            "plugin1": {"setting1": "remote_value", "setting2": "project_value"}
+        }
+
+    def test_deep_merge_plugins_missing_keys_from_project(self):
+        """Test that missing top-level keys are added from project plugins"""
+        remote_plugins = {"plugin1": {"setting": "remote_value"}}
+        project_plugins = {"plugin2": {"setting": "project_value"}}
+
+        result = utils.deep_merge_plugins(remote_plugins, project_plugins)
+
+        assert result == {
+            "plugin1": {"setting": "remote_value"},
+            "plugin2": {"setting": "project_value"},
+        }
+
+    def test_deep_merge_plugins_recursive_merge(self):
+        """Test recursive merging of nested dictionaries"""
+        remote_plugins = {
+            "plugin1": {
+                "nested": {"setting1": "remote_value", "setting2": "remote_value2"}
+            }
+        }
+        project_plugins = {
+            "plugin1": {
+                "nested": {
+                    "setting2": "project_value2",  # Should be overridden
+                    "setting3": "project_value3",  # Should be added
+                }
+            }
+        }
+
+        result = utils.deep_merge_plugins(remote_plugins, project_plugins)
+
+        assert result == {
+            "plugin1": {
+                "nested": {
+                    "setting1": "remote_value",
+                    "setting2": "remote_value2",
+                    "setting3": "project_value3",
+                }
+            }
+        }
+
+    def test_deep_merge_plugins_non_dict_inputs(self):
+        """Test that non-dict inputs return the remote plugins unchanged"""
+        remote_plugins = {"plugin1": {"setting": "value"}}
+
+        # Test with non-dict project_plugins
+        result = utils.deep_merge_plugins(remote_plugins, "not_a_dict")
+        assert result == remote_plugins
+
+        # Test with non-dict remote_plugins
+        result = utils.deep_merge_plugins(
+            "not_a_dict", {"plugin1": {"setting": "value"}}
+        )
+        assert result == "not_a_dict"
+
+        # Test with both non-dict
+        result = utils.deep_merge_plugins("remote", "project")
+        assert result == "remote"
+
+    def test_deep_merge_plugins_type_mismatch(self):
+        """Test that type mismatches preserve remote values"""
+        remote_plugins = {"plugin1": {"setting": "string_value"}}
+        project_plugins = {"plugin1": {"setting": {"nested": "dict_value"}}}
+
+        result = utils.deep_merge_plugins(remote_plugins, project_plugins)
+
+        # Remote takes precedence when types don't match
+        assert result == {"plugin1": {"setting": "string_value"}}
+
+    def test_deep_merge_plugins_deep_copy(self):
+        """Test that deep copy is used to avoid modifying original data"""
+        remote_plugins = {"plugin1": {"setting": "remote_value"}}
+        project_plugins = {"plugin2": {"nested": {"setting": "project_value"}}}
+
+        result = utils.deep_merge_plugins(remote_plugins, project_plugins)
+
+        # Modify the result to check if originals are affected
+        result["plugin2"]["nested"]["setting"] = "modified_value"
+
+        # Original should remain unchanged
+        assert project_plugins["plugin2"]["nested"]["setting"] == "project_value"
+
+    def test_deep_merge_plugins_empty_inputs(self):
+        """Test with empty dictionaries"""
+        # Empty remote, non-empty project
+        result = utils.deep_merge_plugins({}, {"plugin1": {"setting": "value"}})
+        assert result == {"plugin1": {"setting": "value"}}
+
+        # Non-empty remote, empty project
+        result = utils.deep_merge_plugins({"plugin1": {"setting": "value"}}, {})
+        assert result == {"plugin1": {"setting": "value"}}
+
+        # Both empty
+        result = utils.deep_merge_plugins({}, {})
+        assert result == {}
+
+    def test_deep_merge_plugins_complex_nested_structure(self):
+        """Test with complex nested structure"""
+        remote_plugins = {
+            "plugin1": {"level1": {"level2": {"remote_setting": "remote_value"}}}
+        }
+        project_plugins = {
+            "plugin1": {
+                "level1": {
+                    "level2": {"project_setting": "project_value"},
+                    "project_level2": "project_value2",
+                },
+                "project_level1": "project_value3",
+            }
+        }
+
+        result = utils.deep_merge_plugins(remote_plugins, project_plugins)
+
+        expected = {
+            "plugin1": {
+                "level1": {
+                    "level2": {
+                        "remote_setting": "remote_value",
+                        "project_setting": "project_value",
+                    },
+                    "project_level2": "project_value2",
+                },
+                "project_level1": "project_value3",
+            }
+        }
+
+        assert result == expected

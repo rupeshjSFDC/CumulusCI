@@ -426,6 +426,14 @@
                 "custom": {
                     "title": "Custom",
                     "type": "object"
+                },
+                "dependency_flow_pre": {
+                    "title": "Dependency Flow Pre",
+                    "type": "string"
+                },
+                "dependency_flow_post": {
+                    "title": "Dependency Flow Post",
+                    "type": "string"
                 }
             },
             "additionalProperties": false
