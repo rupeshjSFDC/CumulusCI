@@ -400,3 +400,26 @@ def determine_managed_mode(options, project_config, org_config):
     else:
         # Fall back to checking namespace in installed packages
         return bool(namespace) and namespace in installed_packages
+
+
+def deep_merge_plugins(remote_plugins, project_plugins):
+    """
+    Deep merge project_plugins into remote_plugins, adding only missing keys.
+    Remote plugins take precedence, project plugins provide defaults for missing keys.
+    """
+    if not isinstance(remote_plugins, dict) or not isinstance(project_plugins, dict):
+        return remote_plugins
+
+    result = remote_plugins.copy()
+
+    for key, value in project_plugins.items():
+        if key not in result:
+            # Key doesn't exist in remote, add it from project
+            result[key] = copy.deepcopy(value)
+        elif isinstance(result[key], dict) and isinstance(value, dict):
+            # Both are dictionaries, recursively merge
+            result[key] = deep_merge_plugins(result[key], value)
+        # If key exists in remote but types don't match or remote value is not dict,
+        # keep the remote value (remote takes precedence)
+
+    return result

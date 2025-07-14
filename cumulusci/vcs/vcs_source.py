@@ -255,6 +255,7 @@ class VCSSource(ABC):
                 "name": self.repo.repo_name,
                 "url": self.url,
                 "commit": self.commit,
+                "vcs_service": self.vcs_service,
                 # Note: we currently only pass the branch if it was explicitly
                 # included in the source spec. If the commit was found another way,
                 # we aren't looking up what branches have that commit as their head.
