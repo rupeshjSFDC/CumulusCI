@@ -93,9 +93,16 @@ def _signal_handler(signum, frame):
         old_handler = signal.signal(signum, signal.SIG_IGN)
 
         try:
-            pgrp = os.getpgrp()
-            # Send signal to all processes in the group except ourselves
-            os.killpg(pgrp, signum)
+            # Only use process group termination on Unix systems
+            if hasattr(os, "getpgrp") and hasattr(os, "killpg"):
+                pgrp = os.getpgrp()
+                # Send signal to all processes in the group except ourselves
+                os.killpg(pgrp, signum)
+            else:
+                # On Windows, we can't use process groups, so just log the attempt
+                console.print(
+                    "[yellow]Process group termination not supported on this platform[/yellow]"
+                )
         finally:
             # Restore the original signal handler
             signal.signal(signum, old_handler)
