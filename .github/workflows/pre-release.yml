@@ -49,19 +49,23 @@ jobs:
               if: steps.version.outputs.level == 'major' || steps.version.outputs.level == 'minor' || steps.version.outputs.level == 'patch' || steps.version.outputs.level == 'beta'
               id: changelog
               env:
-                  GH_TOKEN: ${{ secrets.GH_TOKEN }}
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
-                  PREVIOUS_VERSION=$(gh release view --json tagName --jq .tagName)
+                  # This will be empty if there are no releases yet
+                  PREVIOUS_VERSION=$(gh release view --json tagName --jq .tagName 2>/dev/null || echo "")
                   NEXT_VERSION="v$(hatch version)"
                   echo "## $NEXT_VERSION ($(date -I))" > changelog.md
-                  gh api \
-                    --method POST \
-                    -H "Accept: application/vnd.github.v3+json" \
-                    /repos/SFDO-Tooling/CumulusCI/releases/generate-notes \
-                    -f previous_tag_name=$PREVIOUS_VERSION \
-                    -f target_commitish='main' \
-                    -f tag_name=$NEXT_VERSION \
-                    --jq '.body' |
+
+                  # Build arguments for the API call
+                  ARGS=("--method" "POST" "-H" "Accept: application/vnd.github.v3+json" "/repos/SFDO-Tooling/CumulusCI/releases/generate-notes" "-f" "target_commitish=main" "-f" "tag_name=$NEXT_VERSION")
+                  if [ -n "$PREVIOUS_VERSION" ]; then
+                    echo "Generating notes between $PREVIOUS_VERSION and $NEXT_VERSION"
+                    ARGS+=("-f" "previous_tag_name=$PREVIOUS_VERSION")
+                  else
+                    echo "No previous release found. Generating notes for the first release."
+                  fi
+
+                  gh api "${ARGS[@]}" --jq '.body' |
                     sed -e 's_\(https.*\/\)\([0-9]*\)$_[#\2](\1\2)_' \
                         -e 's_by @\(.*\) in_by [@\1](https://github.com/\1) in_' >> changelog.md
                   python utility/update-history.py
@@ -82,6 +86,6 @@ jobs:
             - name: Commit changes and open PR
               if: steps.version.outputs.level == 'major' || steps.version.outputs.level == 'minor' || steps.version.outputs.level == 'patch' || steps.version.outputs.level == 'beta'
               env:
-                  GH_TOKEN: ${{ secrets.GH_TOKEN }}
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
                   gh pr create --title "Release v$(hatch version)" --fill --label 'auto-pr'
