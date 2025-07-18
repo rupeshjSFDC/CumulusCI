@@ -9,7 +9,11 @@ from pydantic import ValidationError, root_validator
 
 from cumulusci.core.config.org_config import OrgConfig, VersionInfo
 from cumulusci.core.config.project_config import BaseProjectConfig
-from cumulusci.core.dependencies.base import DynamicDependency, StaticDependency
+from cumulusci.core.dependencies.base import (
+    DynamicDependency,
+    StaticDependency,
+    UnmanagedVcsDependencyFlow,
+)
 from cumulusci.core.dependencies.dependencies import (
     PackageNamespaceVersionDependency,
     PackageVersionIdDependency,
@@ -901,6 +905,203 @@ class TestUnmanagedZipURLDependency:
             check_return=True,
         )
         zf.close()
+
+
+# Concrete implementation of UnmanagedVcsDependencyFlow for testing
+class ConcreteUnmanagedVcsDependencyFlow(UnmanagedVcsDependencyFlow):
+    """Concrete implementation of UnmanagedVcsDependencyFlow for testing"""
+
+    def __init__(self, **kwargs):
+        # Set default values for testing
+        defaults = {
+            "vcs": "github",
+            "url": "https://github.com/test/repo",
+            "commit": "abc123",
+            "flow_name": "test_flow",
+        }
+        defaults.update(kwargs)
+        super().__init__(**defaults)
+
+    @root_validator(pre=True)
+    def sync_vcs_and_url(cls, values):
+        """Implement required abstract method from base class"""
+        return _sync_vcs_and_url(values)
+
+
+class TestUnmanagedVcsDependencyFlow:
+    def test_name(self):
+        """Test the name property"""
+        flow_dep = ConcreteUnmanagedVcsDependencyFlow(
+            url="https://github.com/test/repo", flow_name="install_deps"
+        )
+        expected_name = "Deploy https://github.com/test/repo Flow: install_deps"
+        assert flow_dep.name == expected_name
+
+    def test_description(self):
+        """Test the description property"""
+        flow_dep = ConcreteUnmanagedVcsDependencyFlow(
+            url="https://github.com/test/repo",
+            flow_name="install_deps",
+            commit="abc123",
+        )
+        expected_description = "https://github.com/test/repo Flow: install_deps @abc123"
+        assert flow_dep.description == expected_description
+
+    def test_get_unmanaged(self):
+        """Test the _get_unmanaged method inherited from UnmanagedStaticDependency"""
+        # Test with unmanaged = None and no namespace_inject
+        flow_dep = ConcreteUnmanagedVcsDependencyFlow(
+            unmanaged=None, namespace_inject=None
+        )
+        org_config = mock.Mock()
+        org_config.installed_packages = {}
+        assert flow_dep._get_unmanaged(org_config) is True
+
+        # Test with unmanaged = None and namespace_inject present but not in installed packages
+        flow_dep = ConcreteUnmanagedVcsDependencyFlow(
+            unmanaged=None, namespace_inject="test_ns"
+        )
+        org_config = mock.Mock()
+        org_config.installed_packages = {}
+        assert flow_dep._get_unmanaged(org_config) is True
+
+        # Test with unmanaged = None and namespace_inject present and in installed packages
+        flow_dep = ConcreteUnmanagedVcsDependencyFlow(
+            unmanaged=None, namespace_inject="test_ns"
+        )
+        org_config = mock.Mock()
+        org_config.installed_packages = {"test_ns": mock.Mock()}
+        assert flow_dep._get_unmanaged(org_config) is False
+
+        # Test with explicit unmanaged = True
+        flow_dep = ConcreteUnmanagedVcsDependencyFlow(unmanaged=True)
+        org_config = mock.Mock()
+        assert flow_dep._get_unmanaged(org_config) is True
+
+        # Test with explicit unmanaged = False
+        flow_dep = ConcreteUnmanagedVcsDependencyFlow(unmanaged=False)
+        org_config = mock.Mock()
+        assert flow_dep._get_unmanaged(org_config) is False
+
+    @mock.patch("cumulusci.core.dependencies.base.datetime")
+    @mock.patch("cumulusci.core.dependencies.base.format_duration")
+    @mock.patch("cumulusci.core.dependencies.base.FlowCoordinator")
+    @mock.patch("cumulusci.vcs.vcs_source.VCSSource")
+    @mock.patch("cumulusci.utils.yaml.cumulusci_yml.VCSSourceModel")
+    def test_install(
+        self,
+        vcs_source_model_mock,
+        vcs_source_mock,
+        flow_coordinator_mock,
+        format_duration_mock,
+        datetime_mock,
+    ):
+        """Test the install method"""
+        # Setup mocks
+        mock_context = mock.Mock()
+        mock_context.logger = mock.Mock()
+        mock_context.allow_remote_code = False
+        mock_context.keychain = mock.Mock()
+
+        mock_org = mock.Mock()
+        mock_org.installed_packages = {}
+
+        # Setup VCS source mock
+        mock_vcs_source_instance = mock.Mock()
+        mock_vcs_source_instance.allow_remote_code = False
+        vcs_source_mock.create.return_value = mock_vcs_source_instance
+
+        # Setup project config mock
+        mock_project_config = mock.Mock()
+        mock_vcs_source_instance.fetch.return_value = mock_project_config
+
+        # Setup flow config mock
+        mock_flow_config = mock.Mock()
+        mock_project_config.get_flow.return_value = mock_flow_config
+
+        # Setup coordinator mock
+        mock_coordinator_instance = mock.Mock()
+        flow_coordinator_mock.return_value = mock_coordinator_instance
+
+        # Setup datetime mock
+        from datetime import datetime as real_datetime
+
+        mock_start_time = real_datetime(2023, 1, 1, 10, 0, 0)
+        mock_end_time = real_datetime(2023, 1, 1, 10, 0, 5)
+        datetime_mock.now.side_effect = [mock_start_time, mock_end_time]
+
+        # Setup format duration mock
+        format_duration_mock.return_value = "5.2s"
+
+        # Create flow dependency
+        flow_dep = ConcreteUnmanagedVcsDependencyFlow(
+            vcs="github",
+            url="https://github.com/test/repo",
+            commit="abc123",
+            flow_name="install_deps",
+            namespace_inject="test_ns",
+            namespace_strip="old_ns",
+        )
+
+        # Call install
+        flow_dep.install(mock_context, mock_org)
+
+        # Verify VCSSourceModel was created correctly
+        vcs_source_model_mock.assert_called_once_with(
+            vcs="github",
+            url="https://github.com/test/repo",
+            commit="abc123",
+            allow_remote_code=False,
+        )
+
+        # Verify VCSSource.create was called
+        vcs_source_mock.create.assert_called_once_with(
+            mock_context, vcs_source_model_mock.return_value
+        )
+
+        # Verify fetch was called
+        mock_vcs_source_instance.fetch.assert_called_once()
+
+        # Verify project config setup
+        mock_project_config.set_keychain.assert_called_once_with(mock_context.keychain)
+        assert mock_project_config.source == mock_vcs_source_instance
+
+        # Verify flow config setup
+        mock_project_config.get_flow.assert_called_once_with("install_deps")
+        assert mock_flow_config.name == "install_deps"
+
+        # Verify FlowCoordinator was created correctly
+        flow_coordinator_mock.assert_called_once()
+        args, kwargs = flow_coordinator_mock.call_args
+        assert args[0] == mock_project_config
+        assert args[1] == mock_flow_config
+        assert kwargs["name"] == "install_deps"
+        assert kwargs["options"] == {
+            "unmanaged": True,  # _get_unmanaged should return True for empty installed_packages
+            "namespace_inject": "test_ns",
+            "namespace_strip": "old_ns",
+        }
+        assert kwargs["skip"] is None
+        assert isinstance(kwargs["callbacks"], type(flow_dep.callback_class()))
+
+        # Verify coordinator.run was called
+        mock_coordinator_instance.run.assert_called_once_with(mock_org)
+
+        # Verify logging
+        assert (
+            mock_context.logger.info.call_count == 3
+        )  # Initial log, fetching log, final log
+        mock_context.logger.info.assert_any_call(
+            "Deploying dependency Flow from https://github.com/test/repo Flow: install_deps @abc123"
+        )
+        mock_context.logger.info.assert_any_call(
+            f"Fetching from {mock_vcs_source_instance}"
+        )
+        mock_context.logger.info.assert_any_call("Ran install_deps in 5.2s")
+
+        # Verify datetime and format_duration calls
+        assert datetime_mock.now.call_count == 2
+        format_duration_mock.assert_called_once_with(mock_end_time - mock_start_time)
 
 
 class TestParseDependency:

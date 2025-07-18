@@ -1,5 +1,6 @@
 import contextlib
 from abc import ABC, abstractmethod
+from datetime import datetime
 from typing import List, Optional, Type
 from zipfile import ZipFile
 
@@ -9,11 +10,13 @@ from cumulusci.core.config import OrgConfig
 from cumulusci.core.config.project_config import BaseProjectConfig
 from cumulusci.core.dependencies.utils import TaskContext
 from cumulusci.core.exceptions import DependencyResolutionError, VcsNotFoundError
+from cumulusci.core.flowrunner import FlowCallback, FlowCoordinator
 from cumulusci.core.sfdx import (
     SourceFormat,
     convert_sfdx_source,
     get_source_format_for_zipfile,
 )
+from cumulusci.core.utils import format_duration
 from cumulusci.salesforce_api.metadata import ApiDeploy
 from cumulusci.salesforce_api.package_zip import MetadataPackageZipBuilder
 from cumulusci.utils import download_extract_vcs_from_repo, temporary_dir
@@ -153,11 +156,8 @@ class DynamicDependency(Dependency, ABC):
         resolve_dependency(self, context, strategies)
 
 
-class UnmanagedDependency(StaticDependency, ABC):
-    """Abstract base class for static, unmanaged dependencies."""
-
+class UnmanagedStaticDependency(StaticDependency, ABC):
     unmanaged: Optional[bool] = None
-    subfolder: Optional[str] = None
     namespace_inject: Optional[str] = None
     namespace_strip: Optional[str] = None
     collision_check: Optional[bool] = None
@@ -170,6 +170,12 @@ class UnmanagedDependency(StaticDependency, ABC):
                 return True
 
         return self.unmanaged
+
+
+class UnmanagedDependency(UnmanagedStaticDependency, ABC):
+    """Abstract base class for static, unmanaged dependencies."""
+
+    subfolder: Optional[str] = None
 
     @abstractmethod
     def _get_zip_src(self, context: BaseProjectConfig) -> ZipFile:
@@ -378,6 +384,28 @@ class VcsDynamicDependency(BaseVcsDynamicDependency, ABC):
 
         return values
 
+    def _flatten_dependency_flow(
+        self,
+        remote_config: BaseProjectConfig,
+        flow_type: str,
+        managed: bool,
+        namespace: Optional[str],
+    ) -> List[StaticDependency]:
+
+        if remote_config.project.get(flow_type):
+            return [
+                UnmanagedVcsDependencyFlow(
+                    url=self.url,
+                    vcs=self.vcs,
+                    commit=self.ref,
+                    flow_name=remote_config.project.get(flow_type),
+                    unmanaged=not managed,
+                    namespace_inject=namespace if namespace and managed else None,
+                    namespace_strip=namespace if namespace and not managed else None,
+                )
+            ]
+        return []
+
     def _flatten_unpackaged(
         self,
         repo: AbstractRepo,
@@ -454,6 +482,17 @@ class VcsDynamicDependency(BaseVcsDynamicDependency, ABC):
         # Check for unmanaged flag on a namespaced package
         managed = bool(namespace and not self.unmanaged)
 
+        # Look for any flow to executed in project config
+        # Pre flows will run to dynamically generate metadata and deploy.
+        deps.extend(
+            self._flatten_dependency_flow(
+                package_config,
+                "dependency_flow_pre",
+                managed=managed,
+                namespace=namespace,
+            )
+        )
+
         # Look for subfolders under unpackaged/pre
         # unpackaged/pre is always deployed unmanaged, no namespace manipulation.
         deps.extend(
@@ -481,6 +520,17 @@ class VcsDynamicDependency(BaseVcsDynamicDependency, ABC):
             )
         else:
             deps.append(self.package_dependency)
+
+        # Look for any flow to executed in project config
+        # Pre flows will run to dynamically generate metadata and deploy.
+        deps.extend(
+            self._flatten_dependency_flow(
+                package_config,
+                "dependency_flow_post",
+                managed=managed,
+                namespace=namespace,
+            )
+        )
 
         # We always inject the project's namespace into unpackaged/post metadata if managed
         deps.extend(
@@ -559,3 +609,73 @@ class UnmanagedVcsDependency(UnmanagedDependency, ABC):
         )
 
         return f"{self.url}{subfolder} @{self.ref}"
+
+
+class UnmanagedVcsDependencyFlow(UnmanagedStaticDependency, ABC):
+    vcs: str
+    url: AnyUrl
+    commit: str
+    flow_name: str
+    callback_class = FlowCallback
+
+    # Add these fields to support namespace manipulation
+    namespace_inject: Optional[str] = None
+    namespace_strip: Optional[str] = None
+    password_env_name: Optional[str] = None
+
+    @property
+    def name(self):
+        return f"Deploy {self.url} Flow: {self.flow_name}"
+
+    @property
+    def description(self):
+        return f"{self.url} Flow: {self.flow_name} @{self.commit}"
+
+    def install(self, context: BaseProjectConfig, org: OrgConfig):
+        context.logger.info(f"Deploying dependency Flow from {self.description}")
+
+        from cumulusci.utils.yaml.cumulusci_yml import VCSSourceModel
+        from cumulusci.vcs.vcs_source import VCSSource
+
+        # Get the VCS Source class from the vcs field.
+        source_model = VCSSourceModel(
+            vcs=self.vcs,
+            url=self.url,
+            commit=self.commit,
+            allow_remote_code=context.allow_remote_code,
+        )
+        vcs_source = VCSSource.create(context, source_model)
+
+        # Fetch the data and get remote project config.
+        context.logger.info(f"Fetching from {vcs_source}")
+        project_config = vcs_source.fetch()
+
+        project_config.set_keychain(context.keychain)
+        project_config.source = vcs_source
+
+        # If I can't load remote code, make sure that my
+        # included repos can't either.
+        if vcs_source.allow_remote_code:
+            project_config._add_tasks_directory_to_python_path()
+
+        # Run the flow.
+        flow_config = project_config.get_flow(self.flow_name)
+        flow_config.name = self.flow_name
+
+        coordinator = FlowCoordinator(
+            project_config,
+            flow_config,
+            name=flow_config.name,
+            options={
+                "unmanaged": self._get_unmanaged(org),
+                "namespace_inject": self.namespace_inject,
+                "namespace_strip": self.namespace_strip,
+            },
+            skip=None,
+            callbacks=self.callback_class(),
+        )
+
+        start_time = datetime.now()
+        coordinator.run(org)
+        duration = datetime.now() - start_time
+        context.logger.info(f"Ran {self.flow_name} in {format_duration(duration)}")

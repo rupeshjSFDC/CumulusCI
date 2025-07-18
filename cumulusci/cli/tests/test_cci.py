@@ -1,9 +1,8 @@
 import contextlib
 import io
 import os
-import shutil
+import signal
 import sys
-import tempfile
 from pathlib import Path
 from unittest import mock
 
@@ -26,22 +25,11 @@ CONSOLE = mock.Mock()
 
 
 @pytest.fixture(autouse=True)
-def env_config():
-    config = {
-        "global_tempdir": tempfile.gettempdir(),
-        "tempdir": tempfile.mkdtemp(),
-        "environ_mock": mock.patch.dict(
-            os.environ, {"HOME": tempfile.mkdtemp(), "CUMULUSCI_KEY": ""}
-        ),
-    }
-    # setup
-    config["environ_mock"].start()
-    assert config["global_tempdir"] in os.environ["HOME"]
-    yield config
-    # tear down
-    assert config["global_tempdir"] in os.environ["HOME"]
-    config["environ_mock"].stop()
-    shutil.rmtree(config["tempdir"])
+def reset_signal_handler_flag():
+    """Reset signal handler flag to ensure clean state for tests"""
+    cci._signal_handler_active = False
+    yield
+    cci._signal_handler_active = False
 
 
 @mock.patch("cumulusci.cli.cci.tee_stdout_stderr")
@@ -266,7 +254,9 @@ def test_cci_org_default__no_orgname(
 DEPLOY_CLASS_PATH = f"cumulusci.tasks.salesforce.Deploy{'.Deploy' if sys.version_info >= (3, 11) else ''}"
 
 
-@mock.patch("cumulusci.cli.cci.init_logger", mock.Mock())
+@mock.patch(
+    "cumulusci.cli.cci.init_logger", mock.Mock()
+)  # side effects break other tests
 @mock.patch("cumulusci.cli.cci.tee_stdout_stderr", mock.MagicMock())
 @mock.patch(f"{DEPLOY_CLASS_PATH}.__call__", mock.Mock())
 @mock.patch("sys.exit", mock.Mock())
@@ -543,3 +533,264 @@ def test_dash_dash_version(
 
     cci.main(["cci", "--version"])
     assert len(show_version_info.mock_calls) == 2
+
+
+@mock.patch("sys.exit")
+@mock.patch("cumulusci.cli.cci.Console")
+@mock.patch("os.killpg", create=True)
+@mock.patch("os.getpgrp", create=True)
+@mock.patch("signal.signal")
+def test_signal_handler_terminates_process_group(
+    mock_signal, mock_getpgrp, mock_killpg, mock_console, mock_exit
+):
+    """Test that the signal handler terminates the process group"""
+    console_instance = mock_console.return_value
+    mock_getpgrp.return_value = 1234  # Mock process group ID
+
+    # Mock the global exit stack
+    mock_exit_stack = mock.Mock()
+    with mock.patch.object(cci, "_exit_stack", mock_exit_stack):
+        # Mock hasattr to return True for Unix functions
+        with mock.patch("builtins.hasattr", return_value=True):
+            # Call the signal handler with SIGTERM
+            cci._signal_handler(signal.SIGTERM, None)
+
+            # Verify console output
+            console_instance.print.assert_any_call(
+                "\n[yellow]Received SIGTERM - CumulusCI is being terminated[/yellow]"
+            )
+            console_instance.print.assert_any_call(
+                "[yellow]Exiting with failure code due to external cancellation.[/yellow]"
+            )
+            console_instance.print.assert_any_call(
+                "[yellow]Terminating child processes...[/yellow]"
+            )
+
+            # Verify cleanup was called
+            mock_exit_stack.close.assert_called_once()
+
+            # Verify signal was temporarily ignored and then restored
+            mock_signal.assert_called()
+
+            # Verify process group was terminated
+            mock_getpgrp.assert_called_once()
+            mock_killpg.assert_called_once_with(1234, signal.SIGTERM)
+
+            # Verify exit with correct code
+            mock_exit.assert_called_once_with(143)
+
+
+@mock.patch("sys.exit")
+@mock.patch("cumulusci.cli.cci.Console")
+@mock.patch("os.killpg", create=True)
+@mock.patch("os.getpgrp", create=True)
+@mock.patch("signal.signal")
+def test_signal_handler_sigint(
+    mock_signal, mock_getpgrp, mock_killpg, mock_console, mock_exit
+):
+    """Test that the signal handler properly handles SIGINT"""
+    console_instance = mock_console.return_value
+    mock_getpgrp.return_value = 1234
+
+    # Mock the global exit stack
+    mock_exit_stack = mock.Mock()
+    with mock.patch.object(cci, "_exit_stack", mock_exit_stack):
+        # Mock hasattr to return True for Unix functions
+        with mock.patch("builtins.hasattr", return_value=True):
+            # Call the signal handler with SIGINT
+            cci._signal_handler(signal.SIGINT, None)
+
+            # Verify console output
+            console_instance.print.assert_any_call(
+                "\n[yellow]Received SIGINT - CumulusCI is being terminated[/yellow]"
+            )
+
+            # Verify process group was terminated with SIGINT
+            mock_killpg.assert_called_once_with(1234, signal.SIGINT)
+
+            # Verify exit with correct code for SIGINT
+            mock_exit.assert_called_once_with(130)
+
+
+@mock.patch("sys.exit")
+@mock.patch("cumulusci.cli.cci.Console")
+def test_signal_handler_prevents_recursion(mock_console, mock_exit):
+    """Test that the signal handler prevents recursive calls"""
+    console_instance = mock_console.return_value
+
+    # Set the flag to simulate handler already active
+    with mock.patch.object(cci, "_signal_handler_active", True):
+        # Call the signal handler
+        cci._signal_handler(signal.SIGTERM, None)
+
+        # Verify no console output (handler should return immediately)
+        console_instance.print.assert_not_called()
+
+        # Verify no exit call
+        mock_exit.assert_not_called()
+
+
+@mock.patch("sys.exit")
+@mock.patch("cumulusci.cli.cci.Console")
+@mock.patch("os.killpg", create=True)
+@mock.patch("os.getpgrp", create=True)
+@mock.patch("signal.signal")
+def test_signal_handler_handles_killpg_error(
+    mock_signal, mock_getpgrp, mock_killpg, mock_console, mock_exit
+):
+    """Test that the signal handler handles errors from killpg gracefully"""
+    console_instance = mock_console.return_value
+    mock_getpgrp.return_value = 1234
+    mock_killpg.side_effect = OSError("Process group not found")
+
+    # Mock hasattr to return True for Unix functions
+    with mock.patch("builtins.hasattr", return_value=True):
+        # Call the signal handler with SIGTERM
+        cci._signal_handler(signal.SIGTERM, None)
+
+    # Verify error message was printed
+    console_instance.print.assert_any_call(
+        "[red]Warning: Error terminating child processes: Process group not found[/red]"
+    )
+
+    # Verify it still exits with correct code
+    mock_exit.assert_called_once_with(143)
+
+
+@mock.patch("sys.exit")
+@mock.patch("cumulusci.cli.cci.Console")
+def test_signal_handler_without_process_group_support(mock_console, mock_exit):
+    """Test that the signal handler works on Windows where process groups aren't supported"""
+    console_instance = mock_console.return_value
+
+    # Mock the global exit stack
+    mock_exit_stack = mock.Mock()
+    with mock.patch.object(cci, "_exit_stack", mock_exit_stack):
+        # Mock hasattr to return False for Unix functions (like on Windows)
+        with mock.patch("builtins.hasattr", return_value=False):
+            # Call the signal handler with SIGTERM
+            cci._signal_handler(signal.SIGTERM, None)
+
+            # Verify console output
+            console_instance.print.assert_any_call(
+                "\n[yellow]Received SIGTERM - CumulusCI is being terminated[/yellow]"
+            )
+            console_instance.print.assert_any_call(
+                "[yellow]Exiting with failure code due to external cancellation.[/yellow]"
+            )
+            console_instance.print.assert_any_call(
+                "[yellow]Terminating child processes...[/yellow]"
+            )
+            console_instance.print.assert_any_call(
+                "[yellow]Process group termination not supported on this platform[/yellow]"
+            )
+
+            # Verify cleanup was called
+            mock_exit_stack.close.assert_called_once()
+
+            # Verify exit with correct code
+            mock_exit.assert_called_once_with(143)
+
+
+@mock.patch("os.setpgrp", create=True)
+def test_main_creates_process_group(mock_setpgrp):
+    """Test that main() creates a new process group"""
+    # Mock dependencies to avoid actual CLI execution
+    with mock.patch.multiple(
+        "cumulusci.cli.cci",
+        signal=mock.Mock(),
+        init_requests_trust=mock.Mock(),
+        check_latest_version=mock.Mock(),
+        check_latest_plugins=mock.Mock(),
+        get_tempfile_logger=mock.Mock(return_value=(mock.Mock(), "tempfile.log")),
+        tee_stdout_stderr=mock.Mock(
+            return_value=mock.Mock(__enter__=mock.Mock(), __exit__=mock.Mock())
+        ),
+        set_debug_mode=mock.Mock(
+            return_value=mock.Mock(__enter__=mock.Mock(), __exit__=mock.Mock())
+        ),
+        CliRuntime=mock.Mock(),
+        init_logger=mock.Mock(),
+        cli=mock.Mock(),
+    ):
+        try:
+            cci.main(["cci", "version"])
+        except SystemExit:
+            pass  # Expected for version command
+
+        # Verify process group was created
+        mock_setpgrp.assert_called_once()
+
+
+@mock.patch("os.setpgrp", create=True)
+def test_main_handles_setpgrp_error(mock_setpgrp):
+    """Test that main() handles setpgrp errors gracefully"""
+    mock_setpgrp.side_effect = OSError("Operation not permitted")
+
+    # Mock dependencies to avoid actual CLI execution
+    with mock.patch.multiple(
+        "cumulusci.cli.cci",
+        signal=mock.Mock(),
+        init_requests_trust=mock.Mock(),
+        check_latest_version=mock.Mock(),
+        check_latest_plugins=mock.Mock(),
+        get_tempfile_logger=mock.Mock(return_value=(mock.Mock(), "tempfile.log")),
+        tee_stdout_stderr=mock.Mock(
+            return_value=mock.Mock(__enter__=mock.Mock(), __exit__=mock.Mock())
+        ),
+        set_debug_mode=mock.Mock(
+            return_value=mock.Mock(__enter__=mock.Mock(), __exit__=mock.Mock())
+        ),
+        CliRuntime=mock.Mock(),
+        init_logger=mock.Mock(),
+        cli=mock.Mock(),
+    ):
+        try:
+            # Should not raise an exception even if setpgrp fails
+            cci.main(["cci", "version"])
+        except SystemExit:
+            pass  # Expected for version command
+        except OSError:
+            pytest.fail("main() should handle setpgrp errors gracefully")
+
+        # Verify setpgrp was attempted
+        mock_setpgrp.assert_called_once()
+
+
+@mock.patch("signal.signal")
+def test_main_registers_signal_handlers(mock_signal):
+    """Test that main() registers signal handlers"""
+    # Create a proper context manager mock
+    context_manager_mock = mock.Mock()
+    context_manager_mock.__enter__ = mock.Mock(return_value=context_manager_mock)
+    context_manager_mock.__exit__ = mock.Mock(return_value=None)
+
+    # Create another context manager mock for set_debug_mode
+    debug_context_mock = mock.Mock()
+    debug_context_mock.__enter__ = mock.Mock(return_value=debug_context_mock)
+    debug_context_mock.__exit__ = mock.Mock(return_value=None)
+
+    # Mock dependencies to avoid actual CLI execution
+    with mock.patch.multiple(
+        "cumulusci.cli.cci",
+        init_requests_trust=mock.Mock(),
+        check_latest_version=mock.Mock(),
+        check_latest_plugins=mock.Mock(),
+        get_tempfile_logger=mock.Mock(return_value=(mock.Mock(), "tempfile.log")),
+        tee_stdout_stderr=mock.Mock(return_value=context_manager_mock),
+        set_debug_mode=mock.Mock(return_value=debug_context_mock),
+        CliRuntime=mock.Mock(),
+        init_logger=mock.Mock(),
+        cli=mock.Mock(),
+    ):
+        try:
+            cci.main(["cci", "version"])
+        except SystemExit:
+            pass  # Expected for version command
+
+        # Verify signal handlers were registered
+        expected_calls = [
+            mock.call(signal.SIGTERM, cci._signal_handler),
+            mock.call(signal.SIGINT, cci._signal_handler),
+        ]
+        mock_signal.assert_has_calls(expected_calls, any_order=True)

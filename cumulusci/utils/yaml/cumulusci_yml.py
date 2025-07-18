@@ -144,6 +144,8 @@ class Project(CCIDictModel):
     dependency_pins: Optional[List[Dict[str, str]]]
     source_format: Literal["sfdx", "mdapi"] = "mdapi"
     custom: Optional[Dict] = None
+    dependency_flow_pre: str = None
+    dependency_flow_post: str = None
 
 
 class ScratchOrg(CCIDictModel):

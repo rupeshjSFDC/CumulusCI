@@ -1,7 +1,9 @@
 import code
 import contextlib
+import os
 import pdb
 import runpy
+import signal
 import sys
 import traceback
 
@@ -43,6 +45,78 @@ SUGGEST_ERROR_COMMAND = (
 
 USAGE_ERRORS = (CumulusCIUsageError, click.UsageError)
 
+# Global variable to track the context stack for cleanup on signal
+_exit_stack = None
+_signal_handler_active = False  # Flag to prevent recursive signal handler calls
+
+
+def _signal_handler(signum, frame):
+    """Handle termination signals.
+
+    This handler ensures the CLI exits gracefully with a failure code when
+    receiving SIGTERM or SIGINT signals, such as when an Azure DevOps pipeline
+    is cancelled. It also terminates all child processes in the process group.
+    """
+    global _signal_handler_active
+
+    # Prevent recursive signal handler calls
+    if _signal_handler_active:
+        return
+
+    _signal_handler_active = True
+
+    console = Console()
+
+    signal_names = {signal.SIGTERM: "SIGTERM", signal.SIGINT: "SIGINT"}
+
+    signal_name = signal_names.get(signum, f"signal {signum}")
+
+    console.print(
+        f"\n[yellow]Received {signal_name} - CumulusCI is being terminated[/yellow]"
+    )
+    console.print(
+        "[yellow]Exiting with failure code due to external cancellation.[/yellow]"
+    )
+
+    # Clean up managed resources
+    if _exit_stack:
+        try:
+            _exit_stack.close()
+        except Exception as e:
+            console.print(f"[red]Error during cleanup: {e}[/red]")
+
+    # Terminate child processes in the process group
+    try:
+        console.print("[yellow]Terminating child processes...[/yellow]")
+
+        # Temporarily ignore the signal to prevent recursion
+        old_handler = signal.signal(signum, signal.SIG_IGN)
+
+        try:
+            # Only use process group termination on Unix systems
+            if hasattr(os, "getpgrp") and hasattr(os, "killpg"):
+                pgrp = os.getpgrp()
+                # Send signal to all processes in the group except ourselves
+                os.killpg(pgrp, signum)
+            else:
+                # On Windows, we can't use process groups, so just log the attempt
+                console.print(
+                    "[yellow]Process group termination not supported on this platform[/yellow]"
+                )
+        finally:
+            # Restore the original signal handler
+            signal.signal(signum, old_handler)
+
+    except ProcessLookupError:
+        # Process group may not exist or may already be terminated
+        pass
+    except Exception as e:
+        console.print(f"[red]Warning: Error terminating child processes: {e}[/red]")
+
+    # Exit with appropriate failure code
+    exit_code = 143 if signum == signal.SIGTERM else 130  # Standard exit codes
+    sys.exit(exit_code)
+
 
 #
 # Root command
@@ -54,7 +128,25 @@ def main(args=None):
 
     This wraps the `click` library in order to do some initialization and centralized error handling.
     """
+    global _exit_stack
+
+    # Create a new process group so we can terminate all child processes
+    # when we receive a termination signal
+    try:
+        if hasattr(os, "setpgrp"):
+            # On Unix systems, create a new process group
+            os.setpgrp()
+    except Exception:
+        # On Windows or if setpgrp fails, continue without process group
+        pass
+
+    # Set up signal handlers for graceful termination
+    signal.signal(signal.SIGTERM, _signal_handler)
+    signal.signal(signal.SIGINT, _signal_handler)
+
     with contextlib.ExitStack() as stack:
+        _exit_stack = stack  # Store reference for signal handler cleanup
+
         args = args or sys.argv
 
         # (If enabled) set up requests to validate certs using system CA certs instead of certifi
@@ -98,15 +190,20 @@ def main(args=None):
                 sys.exit(1)
             except Exception as e:
                 if debug:
+                    console = Console()
                     show_debug_info()
+                    console.print(
+                        f"\n[red bold]Debug info for bug reports:\n{traceback.format_exc()}"
+                    )
+                    sys.exit(1)
                 else:
                     handle_exception(
-                        e,
-                        is_error_command,
-                        tempfile_path,
-                        should_show_stacktraces,
+                        e, is_error_command, tempfile_path, should_show_stacktraces
                     )
-                sys.exit(1)
+                    sys.exit(1)
+
+        # Clear the global reference when exiting normally
+        _exit_stack = None
 
 
 def handle_exception(
