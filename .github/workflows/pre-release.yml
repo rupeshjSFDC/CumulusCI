@@ -1,39 +1,50 @@
 name: Draft release pull request
 
 on:
-    workflow_dispatch:
-        inputs:
-            version:
-                description: "Select version bump"
-                default: "minor"
-                type: choice
-                options:
-                    - major
-                    - minor
-                    - patch
-                    - alpha
-                    - beta
-                    - preview
-                    - dev
+    pull_request:
+        types: [closed]
 
 jobs:
     generate-changelog:
         name: Create a PR to update version and release notes
-        runs-on: SFDO-Tooling-Ubuntu
+        if: github.event.pull_request.merged == true && github.event.pull_request.base_ref == 'main'
+        runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@main
-            - name: Set up Python 3.11
+              with:
+                  fetch-depth: 0 # Needed to get all tags for changelog generation
+            - name: Set up Python 3.12
               uses: actions/setup-python@v4
               with:
-                  python-version: 3.11
+                  python-version: 3.12
                   cache: pip
             - name: Install build tool
               run: python -m pip install hatch
+            - name: Determine Version Bump from PR Labels
+              id: version
+              run: |
+                  BUMP="patch"
+                  LABELS='${{ toJSON(github.event.pull_request.labels.*.name) }}'
+                  echo "Checking labels: $LABELS"
+                  if echo "$LABELS" | grep -q "semver:major"; then
+                    BUMP="major"
+                  elif echo "$LABELS" | grep -q "semver:minor"; then
+                    BUMP="minor"
+                  elif echo "$LABELS" | grep -q "semver:alpha"; then
+                    BUMP="alpha"
+                  elif echo "$LABELS" | grep -q "semver:beta"; then
+                    BUMP="beta"
+                  elif echo "$LABELS" | grep -q "semver:preview"; then
+                    BUMP="preview"
+                  elif echo "$LABELS" | grep -q "semver:dev"; then
+                    BUMP="dev"
+                  fi
+                  echo "Version bump determined: $BUMP"
+                  echo "level=${BUMP}" >> $GITHUB_OUTPUT
             - name: Bump version
-              run: hatch version $VERSION
-              env:
-                  VERSION: ${{ inputs.version }}
+              run: hatch version ${{ steps.version.outputs.level }}
             - name: Generate release notes
+              if: contains(['major', 'minor', 'patch', 'beta'], steps.version.outputs.level)
               id: changelog
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -53,10 +64,12 @@ jobs:
                         -e 's_by @\(.*\) in_by [@\1](https://github.com/\1) in_' >> changelog.md
                   python utility/update-history.py
             - name: Lint history
+              if: contains(['major', 'minor', 'patch', 'beta'], steps.version.outputs.level)
               run: |
                   npm install prettier
                   npx prettier --write docs/history.md
             - name: Commit changes
+              if: contains(['major', 'minor', 'patch', 'beta'], steps.version.outputs.level)
               run: |
                   git config user.name github-actions[bot]
                   git config user.email 41898282+github-actions[bot]@users.noreply.github.com
@@ -65,6 +78,7 @@ jobs:
                   git commit -m "Update changelog (automated)"
                   git push origin "release-$(hatch version)"
             - name: Commit changes and open PR
+              if: contains(['major', 'minor', 'patch', 'beta'], steps.version.outputs.level)
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
