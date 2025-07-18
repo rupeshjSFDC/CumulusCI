@@ -6,10 +6,17 @@ on:
         branches:
             - main
 
+concurrency:
+    group: ${{ github.workflow }}
+    cancel-in-progress: true
+
 jobs:
     generate-changelog:
         name: Create a PR to update version and release notes
         if: github.event.pull_request.merged == true
+        permissions:
+            contents: write
+            pull-requests: write
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@main
@@ -77,15 +84,27 @@ jobs:
             - name: Commit changes
               if: steps.version.outputs.level == 'major' || steps.version.outputs.level == 'minor' || steps.version.outputs.level == 'patch' || steps.version.outputs.level == 'beta'
               run: |
+                  BRANCH_NAME="release-$(hatch version)"
                   git config user.name github-actions[bot]
                   git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-                  git switch -c "release-$(hatch version)"
+                  git switch -c "$BRANCH_NAME"
                   git add docs/history.md cumulusci/__about__.py
                   git commit -m "Update changelog (automated)"
-                  git push origin "release-$(hatch version)"
-            - name: Commit changes and open PR
+                  # Delete the remote branch if it exists, ignoring errors if it doesn't.
+                  git push origin --delete "$BRANCH_NAME" || true
+                  # Push the new branch.
+                  git push origin "$BRANCH_NAME"
+            - name: Create and Auto-Merge Release PR
               if: steps.version.outputs.level == 'major' || steps.version.outputs.level == 'minor' || steps.version.outputs.level == 'patch' || steps.version.outputs.level == 'beta'
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
-                  gh pr create --title "Release v$(hatch version)" --fill --label 'auto-pr'
+                  PR_URL=$(gh pr create --title "Release v$(hatch version)" --fill --label 'auto-pr')
+                  if [ -n "$PR_URL" ]; then
+                    echo "Created PR: $PR_URL"
+                    gh pr merge "$PR_URL" --auto --merge --delete-branch
+                    echo "Enabled auto-merge for the release PR."
+                  else
+                    echo "PR creation failed."
+                    exit 1
+                  fi
