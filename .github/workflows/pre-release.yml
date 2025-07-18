@@ -94,7 +94,7 @@ jobs:
                   git push origin --delete "$BRANCH_NAME" || true
                   # Push the new branch.
                   git push origin "$BRANCH_NAME"
-            - name: Create and Auto-Merge Release PR
+            - name: Create and Merge Release PR
               if: steps.version.outputs.level == 'major' || steps.version.outputs.level == 'minor' || steps.version.outputs.level == 'patch' || steps.version.outputs.level == 'beta'
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -102,8 +102,8 @@ jobs:
                   PR_URL=$(gh pr create --title "Release v$(hatch version)" --fill --label 'auto-pr')
                   if [ -n "$PR_URL" ]; then
                     echo "Created PR: $PR_URL"
-                    gh pr merge "$PR_URL" --auto --merge --delete-branch
-                    echo "Enabled auto-merge for the release PR."
+                    gh pr merge "$PR_URL" --merge --delete-branch
+                    echo "PR merged and branch deleted."
                   else
                     echo "PR creation failed."
                     exit 1
