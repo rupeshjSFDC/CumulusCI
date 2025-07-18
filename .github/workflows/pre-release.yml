@@ -3,11 +3,13 @@ name: Draft release pull request
 on:
     pull_request:
         types: [closed]
+        branches:
+            - main
 
 jobs:
     generate-changelog:
         name: Create a PR to update version and release notes
-        if: github.event.pull_request.merged == true && github.event.pull_request.base_ref == 'main'
+        if: github.event.pull_request.merged == true
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@main
