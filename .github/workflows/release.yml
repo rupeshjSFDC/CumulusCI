@@ -1,6 +1,7 @@
 name: Publish and release CumulusCI
 
 on:
+    workflow_dispatch:
     push:
         branches:
             - main
@@ -12,6 +13,8 @@ concurrency: publishing
 jobs:
     publish-to-pypi:
         name: Publish new release to PyPI
+        permissions:
+            contents: write
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@main

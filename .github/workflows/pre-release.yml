@@ -16,10 +16,10 @@ jobs:
         if: github.event.pull_request.merged == true
         permissions:
             contents: write
-            pull-requests: write
+            actions: write
         runs-on: ubuntu-latest
         steps:
-            - uses: actions/checkout@main
+            - uses: actions/checkout@v4
               with:
                   fetch-depth: 0 # Needed to get all tags for changelog generation
             - name: Set up Python 3.12
@@ -81,30 +81,17 @@ jobs:
               run: |
                   npm install prettier
                   npx prettier --write docs/history.md
-            - name: Commit changes
+            - name: Commit version and changelog
               if: steps.version.outputs.level == 'major' || steps.version.outputs.level == 'minor' || steps.version.outputs.level == 'patch' || steps.version.outputs.level == 'beta'
               run: |
-                  BRANCH_NAME="release-$(hatch version)"
                   git config user.name github-actions[bot]
                   git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-                  git switch -c "$BRANCH_NAME"
                   git add docs/history.md cumulusci/__about__.py
-                  git commit -m "Update changelog (automated)"
-                  # Delete the remote branch if it exists, ignoring errors if it doesn't.
-                  git push origin --delete "$BRANCH_NAME" || true
-                  # Push the new branch.
-                  git push origin "$BRANCH_NAME"
-            - name: Create and Merge Release PR
+                  git commit -m "Update changelog for v$(hatch version)"
+                  git push
+            - name: Call Release Workflow
               if: steps.version.outputs.level == 'major' || steps.version.outputs.level == 'minor' || steps.version.outputs.level == 'patch' || steps.version.outputs.level == 'beta'
-              env:
-                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              run: |
-                  PR_URL=$(gh pr create --title "Release v$(hatch version)" --fill --label 'auto-pr')
-                  if [ -n "$PR_URL" ]; then
-                    echo "Created PR: $PR_URL"
-                    gh pr merge "$PR_URL" --merge --delete-branch
-                    echo "PR merged and branch deleted."
-                  else
-                    echo "PR creation failed."
-                    exit 1
-                  fi
+              uses: benc-uk/workflow-dispatch@v1
+              with:
+                  workflow: "Publish and release CumulusCI"
+                  token: ${{ secrets.GITHUB_TOKEN }}
