@@ -49,7 +49,7 @@ jobs:
               if: steps.version.outputs.level == 'major' || steps.version.outputs.level == 'minor' || steps.version.outputs.level == 'patch' || steps.version.outputs.level == 'beta'
               id: changelog
               env:
-                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  GH_TOKEN: ${{ secrets.GH_TOKEN }}
               run: |
                   PREVIOUS_VERSION=$(gh release view --json tagName --jq .tagName)
                   NEXT_VERSION="v$(hatch version)"
@@ -82,6 +82,6 @@ jobs:
             - name: Commit changes and open PR
               if: steps.version.outputs.level == 'major' || steps.version.outputs.level == 'minor' || steps.version.outputs.level == 'patch' || steps.version.outputs.level == 'beta'
               env:
-                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  GH_TOKEN: ${{ secrets.GH_TOKEN }}
               run: |
                   gh pr create --title "Release v$(hatch version)" --fill --label 'auto-pr'
