@@ -44,7 +44,7 @@ jobs:
             - name: Bump version
               run: hatch version ${{ steps.version.outputs.level }}
             - name: Generate release notes
-              if: contains(['major', 'minor', 'patch', 'beta'], steps.version.outputs.level)
+              if: steps.version.outputs.level == 'major' || steps.version.outputs.level == 'minor' || steps.version.outputs.level == 'patch' || steps.version.outputs.level == 'beta'
               id: changelog
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -64,12 +64,12 @@ jobs:
                         -e 's_by @\(.*\) in_by [@\1](https://github.com/\1) in_' >> changelog.md
                   python utility/update-history.py
             - name: Lint history
-              if: contains(['major', 'minor', 'patch', 'beta'], steps.version.outputs.level)
+              if: steps.version.outputs.level == 'major' || steps.version.outputs.level == 'minor' || steps.version.outputs.level == 'patch' || steps.version.outputs.level == 'beta'
               run: |
                   npm install prettier
                   npx prettier --write docs/history.md
             - name: Commit changes
-              if: contains(['major', 'minor', 'patch', 'beta'], steps.version.outputs.level)
+              if: steps.version.outputs.level == 'major' || steps.version.outputs.level == 'minor' || steps.version.outputs.level == 'patch' || steps.version.outputs.level == 'beta'
               run: |
                   git config user.name github-actions[bot]
                   git config user.email 41898282+github-actions[bot]@users.noreply.github.com
@@ -78,7 +78,7 @@ jobs:
                   git commit -m "Update changelog (automated)"
                   git push origin "release-$(hatch version)"
             - name: Commit changes and open PR
-              if: contains(['major', 'minor', 'patch', 'beta'], steps.version.outputs.level)
+              if: steps.version.outputs.level == 'major' || steps.version.outputs.level == 'minor' || steps.version.outputs.level == 'patch' || steps.version.outputs.level == 'beta'
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
