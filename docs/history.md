@@ -2,6 +2,19 @@
 
 <!-- latest-start -->
 
+## v5.7.0 (2026-10-06)
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Changes
+* Enhance PS assignemnt to PSG only if it does not exist by [@rupeshjSFDC](https://github.com/rupeshjSFDC) in [#285](https://github.com/jorgesolebur/CumulusCI/pull/285)
+
+
+**Full Changelog**: https://github.com/jorgesolebur/CumulusCI/compare/v5.6.1...v5.7.0
+
+
+<!-- latest-stop -->
+
 ## v5.6.1 (2026-09-25)
 <!-- Release notes generated using configuration in .github/release.yml at main -->
 
@@ -13,8 +26,6 @@
 
 **Full Changelog**: https://github.com/jorgesolebur/CumulusCI/compare/v5.6.0...v5.6.1
 
-
-<!-- latest-stop -->
 
 ## v5.6.0 (2026-09-16)
 <!-- Release notes generated using configuration in .github/release.yml at main -->
