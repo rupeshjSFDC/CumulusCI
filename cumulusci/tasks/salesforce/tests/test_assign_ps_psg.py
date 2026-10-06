@@ -215,6 +215,14 @@ class TestAssignPermissionSetToPermissionSetGroup:
             },
         )
 
+        # Mock existing PermissionSetGroupComponent query
+        responses.add(
+            method="GET",
+            url=f"{task.org_config.instance_url}/services/data/v{CURRENT_SF_API_VERSION}/query/",
+            status=200,
+            json={"totalSize": 0, "done": True, "records": []},
+        )
+
         # Mock Composite API
         responses.add(
             method="POST",
@@ -228,8 +236,9 @@ class TestAssignPermissionSetToPermissionSetGroup:
 
         task._run_task()
 
-        assert len(responses.calls) == 3
-        composite_request = json.loads(responses.calls[2].request.body)
+        assert len(responses.calls) == 4
+        assert "PermissionSetGroupComponent" in responses.calls[2].request.url
+        composite_request = json.loads(responses.calls[3].request.body)
         assert len(composite_request["records"]) == 2
         assert (
             composite_request["records"][0]["PermissionSetGroupId"] == "0PG000000000001"
@@ -354,6 +363,14 @@ class TestAssignPermissionSetToPermissionSetGroup:
             url=f"{task.org_config.instance_url}/services/data/v{CURRENT_SF_API_VERSION}/query/",
             status=200,
             json={"totalSize": 250, "done": True, "records": ps_records},
+        )
+
+        # Mock existing PermissionSetGroupComponent query
+        responses.add(
+            method="GET",
+            url=f"{task.org_config.instance_url}/services/data/v{CURRENT_SF_API_VERSION}/query/",
+            status=200,
+            json={"totalSize": 0, "done": True, "records": []},
         )
 
         # Mock Composite API calls (2 batches: 200 + 50)
@@ -874,6 +891,14 @@ class TestAssignPermissionSetToPermissionSetGroup:
             },
         )
 
+        # Mock existing PermissionSetGroupComponent query
+        responses.add(
+            method="GET",
+            url=f"{task.org_config.instance_url}/services/data/v{CURRENT_SF_API_VERSION}/query/",
+            status=200,
+            json={"totalSize": 0, "done": True, "records": []},
+        )
+
         # Mock Composite API
         responses.add(
             method="POST",
@@ -887,8 +912,8 @@ class TestAssignPermissionSetToPermissionSetGroup:
 
         task._run_task()
 
-        assert len(responses.calls) == 3
-        composite_request = json.loads(responses.calls[2].request.body)
+        assert len(responses.calls) == 4
+        composite_request = json.loads(responses.calls[3].request.body)
         assert len(composite_request["records"]) == 2
 
     @responses.activate
@@ -930,6 +955,14 @@ class TestAssignPermissionSetToPermissionSetGroup:
                     {"Id": "0PS000000000001", "Name": "PS1", "NamespacePrefix": None}
                 ],
             },
+        )
+
+        # Mock existing PermissionSetGroupComponent query
+        responses.add(
+            method="GET",
+            url=f"{task.org_config.instance_url}/services/data/v{CURRENT_SF_API_VERSION}/query/",
+            status=200,
+            json={"totalSize": 0, "done": True, "records": []},
         )
 
         # Mock Composite API to raise an exception
@@ -984,6 +1017,14 @@ class TestAssignPermissionSetToPermissionSetGroup:
             },
         )
 
+        # Mock existing PermissionSetGroupComponent query
+        responses.add(
+            method="GET",
+            url=f"{task.org_config.instance_url}/services/data/v{CURRENT_SF_API_VERSION}/query/",
+            status=200,
+            json={"totalSize": 0, "done": True, "records": []},
+        )
+
         # Mock Composite API to raise an exception
         responses.add(
             method="POST",
@@ -997,7 +1038,7 @@ class TestAssignPermissionSetToPermissionSetGroup:
 
         # Verify that the error was logged (we can't easily test logging, but we can verify
         # that the task completed without raising)
-        assert len(responses.calls) == 3
+        assert len(responses.calls) == 4
 
     @responses.activate
     def test_run_task_batch_error_with_fail_on_error_default(self):
@@ -1040,6 +1081,14 @@ class TestAssignPermissionSetToPermissionSetGroup:
             },
         )
 
+        # Mock existing PermissionSetGroupComponent query
+        responses.add(
+            method="GET",
+            url=f"{task.org_config.instance_url}/services/data/v{CURRENT_SF_API_VERSION}/query/",
+            status=200,
+            json={"totalSize": 0, "done": True, "records": []},
+        )
+
         # Mock Composite API to raise an exception
         responses.add(
             method="POST",
@@ -1052,4 +1101,350 @@ class TestAssignPermissionSetToPermissionSetGroup:
         task._run_task()
 
         # Verify that the error was logged but task completed
+        assert len(responses.calls) == 4
+
+    def test_get_existing_components_empty_id_list(self):
+        """An empty group list does not query the org."""
+        task = create_task(
+            AssignPermissionSetToPermissionSetGroup,
+            {"assignments": {"PSG1": ["PS1"]}},
+        )
+        task._init_options({})
+        assert task._get_existing_permission_set_group_components([]) == set()
+
+    @responses.activate
+    def test_get_existing_components_follows_pagination(self):
+        """query_all collects components past the first result page."""
+        task = create_task(
+            AssignPermissionSetToPermissionSetGroup,
+            {"assignments": {"PSG1": ["PS1"]}},
+        )
+        task._init_task()
+
+        responses.add(
+            method="GET",
+            url=f"{task.org_config.instance_url}/services/data/v{CURRENT_SF_API_VERSION}/query/",
+            status=200,
+            json={
+                "totalSize": 2,
+                "done": False,
+                "nextRecordsUrl": f"/services/data/v{CURRENT_SF_API_VERSION}/query/01g-next",
+                "records": [
+                    {
+                        "PermissionSetGroupId": "0PG000000000001",
+                        "PermissionSetId": "0PS000000000001",
+                    }
+                ],
+            },
+        )
+        responses.add(
+            method="GET",
+            url=f"https://test.salesforce.com/services/data/v{CURRENT_SF_API_VERSION}/query/01g-next",
+            status=200,
+            json={
+                "totalSize": 2,
+                "done": True,
+                "records": [
+                    {
+                        "PermissionSetGroupId": "0PG000000000001",
+                        "PermissionSetId": "0PS000000000002",
+                    }
+                ],
+            },
+        )
+
+        existing = task._get_existing_permission_set_group_components(
+            ["0PG000000000001"]
+        )
+        assert existing == {
+            ("0PG000000000001", "0PS000000000001"),
+            ("0PG000000000001", "0PS000000000002"),
+        }
+        assert len(responses.calls) == 2
+
+    @responses.activate
+    def test_get_existing_components_chunks_group_ids(self):
+        """Group ids are queried in chunks of 200."""
+        task = create_task(
+            AssignPermissionSetToPermissionSetGroup,
+            {"assignments": {"PSG1": ["PS1"]}},
+        )
+        task._init_task()
+        psg_ids = [f"0PG{i:012d}" for i in range(201)]
+
+        responses.add(
+            method="GET",
+            url=f"{task.org_config.instance_url}/services/data/v{CURRENT_SF_API_VERSION}/query/",
+            status=200,
+            json={"totalSize": 0, "done": True, "records": []},
+        )
+        responses.add(
+            method="GET",
+            url=f"{task.org_config.instance_url}/services/data/v{CURRENT_SF_API_VERSION}/query/",
+            status=200,
+            json={"totalSize": 0, "done": True, "records": []},
+        )
+
+        assert task._get_existing_permission_set_group_components(psg_ids) == set()
+        assert len(responses.calls) == 2
+        assert psg_ids[0] in responses.calls[0].request.url
+        assert psg_ids[199] in responses.calls[0].request.url
+        assert psg_ids[200] not in responses.calls[0].request.url
+        assert psg_ids[200] in responses.calls[1].request.url
+
+    @responses.activate
+    def test_run_task_skips_insert_when_all_components_exist(self):
+        """No composite insert when every requested permission set is already linked."""
+        task = create_task(
+            AssignPermissionSetToPermissionSetGroup,
+            {"assignments": {"PSG1": ["PS1", "PS2"]}},
+        )
+        task._init_task()
+
+        responses.add(
+            method="GET",
+            url=f"{task.org_config.instance_url}/services/data/v{CURRENT_SF_API_VERSION}/query/",
+            status=200,
+            json={
+                "totalSize": 1,
+                "done": True,
+                "records": [
+                    {
+                        "Id": "0PG000000000001",
+                        "DeveloperName": "PSG1",
+                        "NamespacePrefix": None,
+                    }
+                ],
+            },
+        )
+        responses.add(
+            method="GET",
+            url=f"{task.org_config.instance_url}/services/data/v{CURRENT_SF_API_VERSION}/query/",
+            status=200,
+            json={
+                "totalSize": 2,
+                "done": True,
+                "records": [
+                    {"Id": "0PS000000000001", "Name": "PS1", "NamespacePrefix": None},
+                    {"Id": "0PS000000000002", "Name": "PS2", "NamespacePrefix": None},
+                ],
+            },
+        )
+        responses.add(
+            method="GET",
+            url=f"{task.org_config.instance_url}/services/data/v{CURRENT_SF_API_VERSION}/query/",
+            status=200,
+            json={
+                "totalSize": 2,
+                "done": True,
+                "records": [
+                    {
+                        "PermissionSetGroupId": "0PG000000000001",
+                        "PermissionSetId": "0PS000000000001",
+                    },
+                    {
+                        "PermissionSetGroupId": "0PG000000000001",
+                        "PermissionSetId": "0PS000000000002",
+                    },
+                ],
+            },
+        )
+
+        task._run_task()
+
         assert len(responses.calls) == 3
+        assert not any(
+            "composite/sobjects" in call.request.url for call in responses.calls
+        )
+
+    @responses.activate
+    def test_run_task_inserts_only_new_components(self):
+        """Existing links are omitted, including ones the task was not asked to add."""
+        task = create_task(
+            AssignPermissionSetToPermissionSetGroup,
+            {"assignments": {"PSG1": ["PS1", "PS2"]}},
+        )
+        task._init_task()
+
+        responses.add(
+            method="GET",
+            url=f"{task.org_config.instance_url}/services/data/v{CURRENT_SF_API_VERSION}/query/",
+            status=200,
+            json={
+                "totalSize": 1,
+                "done": True,
+                "records": [
+                    {
+                        "Id": "0PG000000000001",
+                        "DeveloperName": "PSG1",
+                        "NamespacePrefix": None,
+                    }
+                ],
+            },
+        )
+        responses.add(
+            method="GET",
+            url=f"{task.org_config.instance_url}/services/data/v{CURRENT_SF_API_VERSION}/query/",
+            status=200,
+            json={
+                "totalSize": 2,
+                "done": True,
+                "records": [
+                    {"Id": "0PS000000000001", "Name": "PS1", "NamespacePrefix": None},
+                    {"Id": "0PS000000000002", "Name": "PS2", "NamespacePrefix": None},
+                ],
+            },
+        )
+        responses.add(
+            method="GET",
+            url=f"{task.org_config.instance_url}/services/data/v{CURRENT_SF_API_VERSION}/query/",
+            status=200,
+            json={
+                "totalSize": 2,
+                "done": True,
+                "records": [
+                    {
+                        "PermissionSetGroupId": "0PG000000000001",
+                        "PermissionSetId": "0PS000000000001",
+                    },
+                    {
+                        "PermissionSetGroupId": "0PG000000000001",
+                        "PermissionSetId": "0PS000000000003",
+                    },
+                ],
+            },
+        )
+        responses.add(
+            method="POST",
+            url=f"{task.org_config.instance_url}/services/data/v{CURRENT_SF_API_VERSION}/composite/sobjects",
+            status=200,
+            json=[{"id": "0PGC00000000002", "success": True, "errors": []}],
+        )
+
+        task._run_task()
+
+        composite_calls = [
+            call for call in responses.calls if "composite/sobjects" in call.request.url
+        ]
+        assert len(composite_calls) == 1
+        records = json.loads(composite_calls[0].request.body)["records"]
+        assert records == [
+            {
+                "attributes": {"type": "PermissionSetGroupComponent"},
+                "PermissionSetGroupId": "0PG000000000001",
+                "PermissionSetId": "0PS000000000002",
+            }
+        ]
+
+    @responses.activate
+    def test_run_task_component_query_error(self):
+        """A component query failure stops the task when fail_on_error is true."""
+        task = create_task(
+            AssignPermissionSetToPermissionSetGroup,
+            {"assignments": {"PSG1": ["PS1"]}, "fail_on_error": True},
+        )
+        task._init_task()
+
+        responses.add(
+            method="GET",
+            url=f"{task.org_config.instance_url}/services/data/v{CURRENT_SF_API_VERSION}/query/",
+            status=200,
+            json={
+                "totalSize": 1,
+                "done": True,
+                "records": [
+                    {
+                        "Id": "0PG000000000001",
+                        "DeveloperName": "PSG1",
+                        "NamespacePrefix": None,
+                    }
+                ],
+            },
+        )
+        responses.add(
+            method="GET",
+            url=f"{task.org_config.instance_url}/services/data/v{CURRENT_SF_API_VERSION}/query/",
+            status=200,
+            json={
+                "totalSize": 1,
+                "done": True,
+                "records": [
+                    {"Id": "0PS000000000001", "Name": "PS1", "NamespacePrefix": None}
+                ],
+            },
+        )
+        responses.add(
+            method="GET",
+            url=f"{task.org_config.instance_url}/services/data/v{CURRENT_SF_API_VERSION}/query/",
+            status=400,
+            json=[{"errorCode": "INVALID_FIELD", "message": "Invalid field"}],
+        )
+
+        with pytest.raises(
+            SalesforceException, match="Error querying Permission Set Group Components"
+        ):
+            task._run_task()
+
+        assert not any(
+            "composite/sobjects" in call.request.url for call in responses.calls
+        )
+
+    @responses.activate
+    def test_run_task_component_query_error_continues_when_fail_on_error_false(self):
+        """With fail_on_error false, a component query failure falls back to insert."""
+        task = create_task(
+            AssignPermissionSetToPermissionSetGroup,
+            {"assignments": {"PSG1": ["PS1"]}, "fail_on_error": False},
+        )
+        task._init_task()
+
+        responses.add(
+            method="GET",
+            url=f"{task.org_config.instance_url}/services/data/v{CURRENT_SF_API_VERSION}/query/",
+            status=200,
+            json={
+                "totalSize": 1,
+                "done": True,
+                "records": [
+                    {
+                        "Id": "0PG000000000001",
+                        "DeveloperName": "PSG1",
+                        "NamespacePrefix": None,
+                    }
+                ],
+            },
+        )
+        responses.add(
+            method="GET",
+            url=f"{task.org_config.instance_url}/services/data/v{CURRENT_SF_API_VERSION}/query/",
+            status=200,
+            json={
+                "totalSize": 1,
+                "done": True,
+                "records": [
+                    {"Id": "0PS000000000001", "Name": "PS1", "NamespacePrefix": None}
+                ],
+            },
+        )
+        responses.add(
+            method="GET",
+            url=f"{task.org_config.instance_url}/services/data/v{CURRENT_SF_API_VERSION}/query/",
+            status=400,
+            json=[{"errorCode": "INVALID_FIELD", "message": "Invalid field"}],
+        )
+        responses.add(
+            method="POST",
+            url=f"{task.org_config.instance_url}/services/data/v{CURRENT_SF_API_VERSION}/composite/sobjects",
+            status=200,
+            json=[{"id": "0PGC00000000001", "success": True, "errors": []}],
+        )
+
+        task._run_task()
+
+        composite_calls = [
+            call for call in responses.calls if "composite/sobjects" in call.request.url
+        ]
+        assert len(composite_calls) == 1
+        records = json.loads(composite_calls[0].request.body)["records"]
+        assert len(records) == 1
+        assert records[0]["PermissionSetId"] == "0PS000000000001"

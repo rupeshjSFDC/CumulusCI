@@ -1,6 +1,6 @@
 import json
 from inspect import signature
-from typing import Dict, List
+from typing import Dict, List, Set, Tuple
 
 from pydantic.v1 import create_model
 
@@ -87,6 +87,11 @@ class AssignPermissionSetToPermissionSetGroup(BaseSalesforceApiTask):
 
     This task creates PermissionSetGroupComponent records to associate
     Permission Sets with Permission Set Groups using the Composite API.
+
+    Components already on a Permission Set Group are left in place. The task
+    queries PermissionSetGroupComponent for the groups in ``assignments`` and
+    inserts only pairs that are not already present. When every requested
+    Permission Set is already in its group, no insert is sent.
 
     Task options:
     - assignments: A dictionary where:
@@ -200,34 +205,9 @@ class AssignPermissionSetToPermissionSetGroup(BaseSalesforceApiTask):
                 raise SalesforceException(msg)
             self.logger.warning(msg)
 
-        # Step 3: Build composite request to create PermissionSetGroupComponent records
-        records = []
-        for psg_name, ps_names in assignments.items():
-            psg_id = self.psg_ids.get(self.psg_names_sanitized[psg_name])
-            if not psg_id:
-                self.logger.warning(
-                    f"Permission Set Group '{psg_name}' not found in the org. Skipping assignment creation."
-                )
-                continue
-
-            for ps_name in ps_names:
-                ps_id = self.ps_ids.get(self.ps_names_sanitized[ps_name])
-                if not ps_id:
-                    self.logger.warning(
-                        f"Permission Set '{ps_name}' not found in the org. Skipping assignment creation."
-                    )
-                    continue
-
-                records.append(
-                    {
-                        "attributes": {"type": "PermissionSetGroupComponent"},
-                        "PermissionSetGroupId": psg_id,
-                        "PermissionSetId": ps_id,
-                    }
-                )
-
+        # Step 3: Insert only Permission Set links that are not already on the group
+        records = self._component_records_to_create(assignments)
         if not records:
-            self.logger.warning("No valid records to create. Nothing to do.")
             return
 
         # Step 4: Use Composite API to create records in batches of 200
@@ -331,6 +311,100 @@ class AssignPermissionSetToPermissionSetGroup(BaseSalesforceApiTask):
             elif (record_name, None) in name_mapping:
                 original_name = name_mapping[(record_name, None)]
                 self.ps_ids[original_name] = record["Id"]
+
+    def _component_records_to_create(
+        self, assignments: Dict[str, List[str]]
+    ) -> List[Dict]:
+        """Build PermissionSetGroupComponent rows for links that are not in the org."""
+        pairs = []
+        for psg_name, ps_names in assignments.items():
+            psg_id = self.psg_ids.get(self.psg_names_sanitized[psg_name])
+            if not psg_id:
+                self.logger.warning(
+                    f"Permission Set Group '{psg_name}' not found in the org. Skipping assignment creation."
+                )
+                continue
+
+            for ps_name in ps_names:
+                ps_id = self.ps_ids.get(self.ps_names_sanitized[ps_name])
+                if not ps_id:
+                    self.logger.warning(
+                        f"Permission Set '{ps_name}' not found in the org. Skipping assignment creation."
+                    )
+                    continue
+                pairs.append((psg_name, psg_id, ps_name, ps_id))
+
+        if not pairs:
+            self.logger.warning("No valid records to create. Nothing to do.")
+            return []
+
+        psg_ids = list(dict.fromkeys(psg_id for _, psg_id, _, _ in pairs))
+        try:
+            existing_components = self._get_existing_permission_set_group_components(
+                psg_ids
+            )
+        except Exception as e:
+            msg = f"Error querying Permission Set Group Components: {str(e)}"
+            if self.parsed_options.fail_on_error:
+                raise SalesforceException(msg) from e
+            self.logger.error(msg)
+            existing_components = set()
+
+        records = []
+        skipped_existing = 0
+        for psg_name, psg_id, ps_name, ps_id in pairs:
+            if (psg_id, ps_id) in existing_components:
+                skipped_existing += 1
+                self.logger.info(
+                    f"Permission Set '{self.ps_names_sanitized.get(ps_name, ps_name)}' is already assigned to Permission Set Group '{self.psg_names_sanitized.get(psg_name, psg_name)}'. Skipping assignment creation."
+                )
+                continue
+
+            records.append(
+                {
+                    "attributes": {"type": "PermissionSetGroupComponent"},
+                    "PermissionSetGroupId": psg_id,
+                    "PermissionSetId": ps_id,
+                }
+            )
+
+        if not records:
+            self.logger.info(
+                "No new Permission Set Group components to create. "
+                f"{skipped_existing} assignment(s) already exist."
+            )
+        return records
+
+    def _get_existing_permission_set_group_components(
+        self, psg_ids: List[str]
+    ) -> Set[Tuple[str, str]]:
+        """Return Permission Set to Permission Set Group links already in the org.
+
+        Queries every PermissionSetGroupComponent for the given groups so the
+        task can insert only pairs that are not already present. ``query_all``
+        follows query pagination when a group has more components than one
+        page returns.
+        """
+        existing = set()
+        if not psg_ids:
+            return existing
+
+        # Keep each IN clause small enough for the REST query URL limit.
+        for i in range(0, len(psg_ids), 200):
+            id_literals = ", ".join(
+                "'" + psg_id.replace("'", "''") + "'" for psg_id in psg_ids[i : i + 200]
+            )
+            query = (
+                "SELECT PermissionSetGroupId, PermissionSetId "
+                "FROM PermissionSetGroupComponent "
+                f"WHERE PermissionSetGroupId IN ({id_literals})"
+            )
+            result = self.sf.query_all(query)
+            for record in result.get("records", []):
+                existing.add(
+                    (record["PermissionSetGroupId"], record["PermissionSetId"])
+                )
+        return existing
 
     def _create_permission_set_group_components(self, records: List[Dict]):
         """Create PermissionSetGroupComponent records using Composite API."""
